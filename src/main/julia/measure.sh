@@ -1,3 +1,4 @@
+# To download Julia visit https://julialang.org/downloads/
 echo
 echo "<Performance for $(basename "$PWD")>"
 julia --version
