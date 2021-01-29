@@ -1,3 +1,5 @@
+# Note: Tested on Julia 1.5.3
+
 struct Coordinate
     row::Int
     hole::Int
@@ -82,8 +84,18 @@ function search(gs::GameState, gc::GameCounter, move_stack::Vector{Move})
     end
 end
 
-gs = GameState(5, Coordinate(3, 2), [])
-gc = GameCounter(0, Move[])
-init!(gs)
+function game()
+    gs = GameState(5, Coordinate(3, 2), [])
+    gc = GameCounter(0, Move[])
+    init!(gs)
+    search(gs, gc, Move[])
+    gc
+end
 
-@time search(gs, gc, Move[])
+# First run to compile
+game()
+
+# Second run to measure
+@time gc = game()
+println("Games played: ", gc.games_played)
+println("Games solution: ", length(gc.games_solution))
