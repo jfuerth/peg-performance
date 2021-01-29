@@ -1,5 +1,3 @@
-# Note: Tested on Julia 1.5.3
-
 struct Coordinate
     row::Int
     hole::Int
@@ -36,12 +34,12 @@ end
 
 function get_legal_moves(gs::GameState)
     legal_moves = Move[]
-    @inbounds for co in gs.occupied_holes
+    for co in gs.occupied_holes
         moves = get_possible_moves(co, gs.rows)
         for move in moves
             contains_jumped = move.jumped in gs.occupied_holes
             contains_to = move.to in gs.occupied_holes
-            contains_jumped && !contains_to && push!(legal_moves, move)  
+            contains_jumped & !contains_to && push!(legal_moves, move)  
         end
     end
     legal_moves
@@ -50,9 +48,11 @@ end
 function apply_move(gs::GameState, move::Move)
     new_gs = GameState(gs.rows, gs.empty_hole, gs.occupied_holes)
 
-    new_gs.occupied_holes = new_gs.occupied_holes[new_gs.occupied_holes .!= [move.fromh]]
-    new_gs.occupied_holes = new_gs.occupied_holes[new_gs.occupied_holes .!= [move.jumped]]
-    
+    occ = BitVector(undef, length(new_gs.occupied_holes))
+    for i in eachindex(occ)
+        occ[i] = @views (new_gs.occupied_holes[i] != move.fromh) & (new_gs.occupied_holes[i] != move.jumped)
+    end
+    @inbounds new_gs.occupied_holes = new_gs.occupied_holes[occ]
     push!(new_gs.occupied_holes, move.to)
     new_gs
 end
@@ -61,7 +61,6 @@ mutable struct GameCounter
     games_played::Int
     games_solution::Vector{Move}
 end
-
 
 function search(gs::GameState, gc::GameCounter, move_stack::Vector{Move})
     if length(gs.occupied_holes) == 1
