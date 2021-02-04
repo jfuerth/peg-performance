@@ -1,16 +1,34 @@
 struct Coordinate
     row::Int
     hole::Int
+    
+    function Coordinate(row, hole)
+        hole < 1   && throw(error("Illegal hole number"))
+        hole > row && throw(error("Illegal hole number"))
+        new(row, hole)
+    end
 end
 
-function get_possible_moves(co::Coordinate, row_count)
-    moves = Move[]
-    co.row >= 3 && co.hole >= 3          && push!(moves, Move(co, Coordinate(co.row - 1, co.hole - 1), Coordinate(co.row - 2, co.hole - 2)))
-    co.row >= 3 && co.row - co.hole >= 2 && push!(moves, Move(co, Coordinate(co.row - 1, co.hole), Coordinate(co.row - 2, co.hole)))
-    co.hole >= 3                         && push!(moves, Move(co, Coordinate(co.row, co.hole - 1), Coordinate(co.row, co.hole - 2)))
-    co.row - co.hole >= 2                && push!(moves, Move(co, Coordinate(co.row, co.hole + 1), Coordinate(co.row, co.hole + 2)))
-    row_count - co.row >= 2              && (push!(moves, Move(co, Coordinate(co.row + 1, co.hole), Coordinate(co.row + 2, co.hole))),
-                                            push!(moves, Move(co, Coordinate(co.row + 1, co.hole + 1), Coordinate(co.row + 2, co.hole + 2))))
+@inline function get_possible_moves(co::Coordinate, row_count::Int)::Vector{Move}
+    moves = Vector{Move}(undef, 0)
+    if co.row >= 3
+        if co.hole >= 3
+            push!(moves, Move(co, Coordinate(co.row - 1, co.hole - 1), Coordinate(co.row - 2, co.hole - 2)))
+        end
+        if co.row - co.hole >= 2
+            push!(moves, Move(co, Coordinate(co.row - 1, co.hole), Coordinate(co.row - 2, co.hole)))
+        end
+    end
+    if co.hole >= 3
+        push!(moves, Move(co, Coordinate(co.row, co.hole - 1), Coordinate(co.row, co.hole - 2)))
+    end
+    if co.row - co.hole >= 2
+        push!(moves, Move(co, Coordinate(co.row, co.hole + 1), Coordinate(co.row, co.hole + 2)))
+    end
+    if row_count - co.row >= 2
+        push!(moves, Move(co, Coordinate(co.row + 1, co.hole), Coordinate(co.row + 2, co.hole)))
+        push!(moves, Move(co, Coordinate(co.row + 1, co.hole + 1), Coordinate(co.row + 2, co.hole + 2)))
+    end
     moves
 end
 
@@ -20,81 +38,88 @@ struct Move
     to::Coordinate
 end
 
-mutable struct GameState
+struct GameState
     rows::Int
     empty_hole::Coordinate
     occupied_holes::Vector{Coordinate}
-end
 
-function init!(gs::GameState)
-    for row in 1:gs.rows, hole in 1:row
-        (gs.empty_hole.row == row && gs.empty_hole.hole == hole) || push!(gs.occupied_holes, Coordinate(row, hole))
+    function GameState(rows, empty_hole, occupied_holes)
+        if length(occupied_holes) == 0
+            for row in 1:rows, hole in 1:row
+                (empty_hole.row == row && empty_hole.hole == hole) || push!(occupied_holes, Coordinate(row, hole))
+            end
+        end
+        new(rows, empty_hole, occupied_holes)
     end
 end
 
-function get_legal_moves(gs::GameState)
-    legal_moves = Move[]
+@inline function get_legal_moves(gs::GameState)::Vector{Move}
+    legal_moves = Vector{Move}(undef, 0)
     for co in gs.occupied_holes
         moves = get_possible_moves(co, gs.rows)
         for move in moves
             contains_jumped = move.jumped in gs.occupied_holes
             contains_to = move.to in gs.occupied_holes
-            contains_jumped & !contains_to && push!(legal_moves, move)  
+            contains_jumped && !contains_to && push!(legal_moves, move)  
         end
     end
     legal_moves
 end
 
-function apply_move(gs::GameState, move::Move)
-    new_gs = GameState(gs.rows, gs.empty_hole, gs.occupied_holes)
-
-    occ = BitVector(undef, length(new_gs.occupied_holes))
-    for i in eachindex(occ)
-        occ[i] = @views (new_gs.occupied_holes[i] != move.fromh) & (new_gs.occupied_holes[i] != move.jumped)
+@inline function fast_filter(x::Vector{Coordinate}, y1::Coordinate, y2::Coordinate)
+    oh_ix = BitVector(undef, length(x))
+    for i in eachindex(oh_ix)
+        oh_ix[i] = (x[i] != y1) & (x[i] != y2)
     end
-    @inbounds new_gs.occupied_holes = new_gs.occupied_holes[occ]
-    push!(new_gs.occupied_holes, move.to)
+    oh_ix
+end
+
+@inline function apply_move(gs::GameState, move::Move)::GameState
+    move.to in gs.occupied_holes               && throw(error("Move is not consistent with game state: 'to' hole was occupied."))
+    (move.to.row > gs.rows || move.to.row < 1) && throw(error("Move is not legal because the 'to' hole does not exist"))
+
+    oh_ix = fast_filter(gs.occupied_holes, move.fromh, move.jumped)
+
+    @inbounds new_gs = GameState(gs.rows, gs.empty_hole, push!(gs.occupied_holes[oh_ix], move.to))
     new_gs
 end
 
-mutable struct GameCounter
+struct GameCounter
     games_played::Int
     games_solution::Vector{Move}
 end
 
+increment(gc::GameCounter) = GameCounter(gc.games_played + 1, gc.games_solution)
+increment(gc::GameCounter, move_stack::Vector{Move}) = GameCounter(gc.games_played + 1, append!(gc.games_solution, move_stack))
+
+
 function search(gs::GameState, gc::GameCounter, move_stack::Vector{Move})
     if length(gs.occupied_holes) == 1
-        gc.games_played += 1
-        append!(gc.games_solution, move_stack)
-        return
+        return increment(gc, move_stack)
     end
+    
     legal_moves = get_legal_moves(gs)
     
     if length(legal_moves) == 0
-        gc.games_played += 1
-        return
+        return increment(gc)
     end
     
     for move in legal_moves
         new_gs = apply_move(gs, move)
         push!(move_stack, move)
-        search(new_gs, gc, move_stack)
+        gc = search(new_gs, gc, move_stack)
         pop!(move_stack)
     end
-end
-
-function game()
-    gs = GameState(5, Coordinate(3, 2), [])
-    gc = GameCounter(0, Move[])
-    init!(gs)
-    search(gs, gc, Move[])
     gc
 end
 
-# First run to compile
-game()
+function game()
+    gs = GameState(5, Coordinate(3, 2), Vector{Coordinate}(undef, 0))
+    gc = GameCounter(0, Vector{Move}(undef, 0))
+    gc = search(gs, gc, Vector{Move}(undef, 0))
+    gc
+end
 
-# Second run to measure
 @time gc = game()
 println("Games played: ", gc.games_played)
 println("Games solution: ", length(gc.games_solution))
